@@ -21,9 +21,9 @@ typedef struct {
   char *content;
 } RPCJson;
 
-// TODO: Create a index of the current position in the buffer
 typedef struct {
   char *data;
+  char *current_pos;
   size_t size;
   size_t capacity;
 } Buffer;
@@ -59,7 +59,7 @@ int main() {
   printf("CONTENT: %s\n", rpcJson->content);
 
   free_rpc_json(rpcJson);
-  //free_buffer(buff);
+  free_buffer(buff);
 
   return 0;
 }
@@ -70,6 +70,7 @@ Buffer* create_buffer() {
   buff->capacity = bufferSize;
   buff->size = 0;
   buff->data = malloc(bufferSize);
+  buff->current_pos = buff->data;
 
   return buff;
 }
@@ -104,46 +105,47 @@ Buffer* read_input(int fd) {
 
 RPCJson* mount_input(Buffer *buff) {
   RPCJson *rpcJson = (RPCJson*)malloc(sizeof(RPCJson));
+  char contentLengthKey[16] = "Content-Length: ";
+  char contentTypeKey[14] = "Content-Type: ";
   size_t i = 0;
   int state = RPC_STATE_CONTENT_LENGTH;
 
   // TODO: Make contentLengthKey lowerCase
-  if (memcmp(buff->data, "Content-Length: ", 16) != 0) {
+  if (memcmp(buff->current_pos, contentLengthKey, sizeof(contentLengthKey)) != 0) {
     free_rpc_json(rpcJson);
     return NULL;
   }
 
-  buff->data += 16;
+  buff->current_pos += sizeof(contentLengthKey) - 2;
 
-  // TODO:  handle cases where header dont have content_type
   while(i < buff->size) {
-    if (buff->data[i] == '\r' && buff->data[i + 1] == '\n') {
-      i += 2;
+    if (buff->current_pos[i] == '\r' && buff->current_pos[i + 1] == '\n') {
+      buff->current_pos += 2;
       switch (state) {
         case (RPC_STATE_CONTENT_LENGTH): {
           char tmpBuff[i];
           state = RPC_STATE_CONTENT_TYPE;
           tmpBuff[i] = '\0';
-          memcpy(tmpBuff, buff->data, i);
+          memcpy(tmpBuff, buff->current_pos, i);
           rpcJson->contentLength = atoi(tmpBuff);
-          buff->data += i;
+          buff->current_pos += i;
           i = 0;
 
           // TODO: use memcmp and lowerCase
-          if (memcmp(buff->data, "Content-Type: ", 14)) {
+          if (memcmp(buff->data, contentTypeKey, sizeof(contentTypeKey))) {
             state = RPC_STATE_CONTENT;
-            buff->data += 2;
+            buff->current_pos += 2;
           }
           break;
         }
 
         case (RPC_STATE_CONTENT_TYPE):
           state = RPC_STATE_CONTENT;
-          buff->data += 14;
-          rpcJson->contentType = malloc(i - 16);
-          memcpy(rpcJson->contentType, buff->data, i - 16);
-          rpcJson->contentType[i - 16] = '\0';
-          buff->data += (i - 14 + 2);
+          buff->current_pos += sizeof(contentTypeKey);
+          rpcJson->contentType = malloc(i - sizeof(contentTypeKey));
+          memcpy(rpcJson->contentType, buff->data, i - sizeof(contentTypeKey));
+          rpcJson->contentType[i - sizeof(contentTypeKey)] = '\0';
+          buff->current_pos += (i - sizeof(contentTypeKey) + 2);
           break;
       }
       continue;
@@ -152,8 +154,9 @@ RPCJson* mount_input(Buffer *buff) {
     i++;
 
     if (state == RPC_STATE_CONTENT) {
-      rpcJson->content = malloc(rpcJson->contentLength);
-      memcpy(rpcJson->content, buff->data, rpcJson->contentLength);
+      rpcJson->content = malloc(rpcJson->contentLength + 1);
+      memcpy(rpcJson->content, buff->current_pos, rpcJson->contentLength);
+      rpcJson->content[rpcJson->contentLength + 1] = '\0';
       return rpcJson;
     }
   }
