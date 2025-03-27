@@ -12,14 +12,7 @@ typedef enum {
   RPC_STATE_CONTENT_LENGTH,
   RPC_STATE_CONTENT_TYPE,
   RPC_STATE_CONTENT,
-  RPC_STATE_EXIT
 } RPCReadState;
-
-typedef struct {
-  int contentLength;
-  char *contentType;
-  char *content;
-} RPCJson;
 
 typedef struct {
   char *data;
@@ -28,11 +21,19 @@ typedef struct {
   size_t capacity;
 } Buffer;
 
-RPCJson* mount_input(Buffer *buff);
+typedef struct {
+  int contentLength;
+  char *contentType;
+  Buffer *content;
+} RPCJsonMetadata;
+
+RPCJsonMetadata* mount_input(Buffer *buff);
 Buffer* read_input(int fd);
 Buffer* create_buffer();
 void free_buffer(Buffer *buff);
-void free_rpc_json(RPCJson *rpcJson);
+void free_rpc_json(RPCJsonMetadata *rpcJson);
+void toLowerCase(char *str);
+int compare_key(Buffer *buff, char *key);
 
 int main() {
   FILE *json = fopen("./package.json", "r");
@@ -45,20 +46,20 @@ int main() {
   int fd = fileno(json);
 
   Buffer *buff = read_input(fd);
-  RPCJson *rpcJson = mount_input(buff);
+  RPCJsonMetadata *rpcJsonMetadata = mount_input(buff);
 
-  if (rpcJson == NULL) {
+  if (rpcJsonMetadata == NULL) {
     free_buffer(buff);
     fprintf(stderr, "Could not parse RPCJson\n");
     return 1;
   }
 
   printf("BUFFER-LENGTH: %zu\n", buff->size);
-  printf("CONTENT-LENGTH: %d\n", rpcJson->contentLength);
-  printf("CONTENT-TYPE: %s\n", rpcJson->contentType);
-  printf("CONTENT: %s\n", rpcJson->content);
+  printf("CONTENT-LENGTH: %d\n", rpcJsonMetadata->contentLength);
+  printf("CONTENT-TYPE: %s\n", rpcJsonMetadata->contentType);
+  printf("CONTENT: %s\n", rpcJsonMetadata->content->data);
 
-  free_rpc_json(rpcJson);
+  free_rpc_json(rpcJsonMetadata);
   free_buffer(buff);
 
   return 0;
@@ -103,66 +104,86 @@ Buffer* read_input(int fd) {
   return buff;
 }
 
-RPCJson* mount_input(Buffer *buff) {
-  RPCJson *rpcJson = (RPCJson*)malloc(sizeof(RPCJson));
-  char contentLengthKey[16] = "Content-Length: ";
-  char contentTypeKey[14] = "Content-Type: ";
-  size_t i = 0;
+RPCJsonMetadata* mount_input(Buffer *buff) {
+  RPCJsonMetadata *rpcJsonMetadata = (RPCJsonMetadata*)malloc(sizeof(RPCJsonMetadata));
+
+  char contentLengthKey[16] = "content-length: ";
+  char contentTypeKey[14] = "content-type: ";
+  size_t bytes_moved = 0;
   int state = RPC_STATE_CONTENT_LENGTH;
 
-  // TODO: Make contentLengthKey lowerCase
-  if (memcmp(buff->current_pos, contentLengthKey, sizeof(contentLengthKey)) != 0) {
-    free_rpc_json(rpcJson);
+  rpcJsonMetadata->content = create_buffer();
+
+  if (rpcJsonMetadata->content == NULL) {
+    free_rpc_json(rpcJsonMetadata);
+    return NULL;
+  }
+
+  if (compare_key(buff, contentLengthKey) != 0) {
+    free_rpc_json(rpcJsonMetadata);
     return NULL;
   }
 
   buff->current_pos += sizeof(contentLengthKey) - 2;
 
-  while(i < buff->size) {
-    if (buff->current_pos[i] == '\r' && buff->current_pos[i + 1] == '\n') {
+  while(bytes_moved < buff->size) {
+    if (buff->current_pos[bytes_moved] == '\r' && buff->current_pos[bytes_moved + 1] == '\n') {
       buff->current_pos += 2;
       switch (state) {
         case (RPC_STATE_CONTENT_LENGTH): {
-          char tmpBuff[i];
+          char tmpBuff[bytes_moved];
           state = RPC_STATE_CONTENT_TYPE;
-          tmpBuff[i] = '\0';
-          memcpy(tmpBuff, buff->current_pos, i);
-          rpcJson->contentLength = atoi(tmpBuff);
-          buff->current_pos += i;
-          i = 0;
+          tmpBuff[bytes_moved] = '\0';
+          memcpy(tmpBuff, buff->current_pos, bytes_moved);
+          rpcJsonMetadata->contentLength = atoi(tmpBuff);
+          buff->current_pos += bytes_moved;
+          bytes_moved = 0;
 
-          // TODO: use memcmp and lowerCase
-          if (memcmp(buff->data, contentTypeKey, sizeof(contentTypeKey))) {
+          if (compare_key(buff, contentTypeKey) != 0) {
             state = RPC_STATE_CONTENT;
             buff->current_pos += 2;
+            break;
           }
+
+          buff->current_pos += sizeof(contentTypeKey) - 2;
           break;
         }
 
         case (RPC_STATE_CONTENT_TYPE):
           state = RPC_STATE_CONTENT;
-          buff->current_pos += sizeof(contentTypeKey);
-          rpcJson->contentType = malloc(i - sizeof(contentTypeKey));
-          memcpy(rpcJson->contentType, buff->data, i - sizeof(contentTypeKey));
-          rpcJson->contentType[i - sizeof(contentTypeKey)] = '\0';
-          buff->current_pos += (i - sizeof(contentTypeKey) + 2);
+          rpcJsonMetadata->contentType = malloc(bytes_moved);
+          memcpy(rpcJsonMetadata->contentType, buff->current_pos, bytes_moved - 1);
+          rpcJsonMetadata->contentType[bytes_moved] = '\0';
+          buff->current_pos += bytes_moved + 2;
           break;
       }
       continue;
     }
 
-    i++;
+    bytes_moved++;
 
     if (state == RPC_STATE_CONTENT) {
-      rpcJson->content = malloc(rpcJson->contentLength + 1);
-      memcpy(rpcJson->content, buff->current_pos, rpcJson->contentLength);
-      rpcJson->content[rpcJson->contentLength + 1] = '\0';
-      return rpcJson;
+      rpcJsonMetadata->content->capacity = rpcJsonMetadata->contentLength + 1;
+      rpcJsonMetadata->content->size = rpcJsonMetadata->contentLength + 1;
+      rpcJsonMetadata->content->data = realloc(rpcJsonMetadata->content->data, rpcJsonMetadata->content->capacity);
+      memcpy(rpcJsonMetadata->content->data, buff->current_pos, rpcJsonMetadata->contentLength);
+      rpcJsonMetadata->content->data[rpcJsonMetadata->contentLength + 1] = '\0';
+      return rpcJsonMetadata;
     }
   }
 
-  free_rpc_json(rpcJson);
+  free_rpc_json(rpcJsonMetadata);
   return NULL;
+}
+
+int compare_key(Buffer *buff, char *key) {
+  char *keyReaded = malloc(sizeof(key) + 1);
+  memcpy(keyReaded, buff->current_pos, sizeof(*key));
+  keyReaded[sizeof(key) + 1] = '\0';
+  toLowerCase(keyReaded);
+  int result = memcmp(keyReaded, key, sizeof(*key));
+  free(keyReaded);
+  return result;
 }
 
 void free_buffer(Buffer *buff) {
@@ -171,10 +192,21 @@ void free_buffer(Buffer *buff) {
     free(buff);
   }
 }
-void free_rpc_json(RPCJson *rpcJson) {
+void free_rpc_json(RPCJsonMetadata *rpcJson) {
   if (rpcJson != NULL) {
-    free(rpcJson->content);
+    free_buffer(rpcJson->content);
     free(rpcJson->contentType);
     free(rpcJson);
+  }
+}
+
+void toLowerCase(char *str) {
+  char *aux = str;
+
+  while(*aux != '\0') {
+    if (*aux >= 65 && *aux <= 90) {
+      *aux = *aux + 32;
+    }
+    aux++;
   }
 }
