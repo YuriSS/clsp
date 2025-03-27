@@ -46,6 +46,12 @@ int main() {
   int fd = fileno(json);
 
   Buffer *buff = read_input(fd);
+
+  if (buff == NULL) {
+    fprintf(stderr, "Could create buffer\n");
+    return 1;
+  }
+
   RPCJsonMetadata *rpcJsonMetadata = mount_input(buff);
 
   if (rpcJsonMetadata == NULL) {
@@ -55,6 +61,7 @@ int main() {
   }
 
   printf("BUFFER-LENGTH: %zu\n", buff->size);
+  printf("BUFFER-CAPACITY: %zu\n", buff->capacity);
   printf("CONTENT-LENGTH: %d\n", rpcJsonMetadata->contentLength);
   printf("CONTENT-TYPE: %s\n", rpcJsonMetadata->contentType);
   printf("CONTENT: %s\n", rpcJsonMetadata->content->data);
