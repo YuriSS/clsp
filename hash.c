@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct HashNode {
   char *key;
@@ -13,9 +14,9 @@ typedef struct {
   size_t size;
 } HashTable;
 
-HashNode* create_hash_node(char *key, void *value);
+HashNode* create_hash_node(char *key, void *value, size_t valueSize);
 HashTable* create_hash_table(size_t capacity);
-void hash_table_insert(HashTable *ht, char *key, void *value);
+void hash_table_insert(HashTable *ht, char *key, void *value, size_t valueSize);
 void hash_table_print(HashTable *ht);
 int djb2(char *key, size_t size);
 
@@ -24,9 +25,9 @@ int main() {
   int i = 1;
   char a = 'a';
   char str[3] = "abc";
-  hash_table_insert(ht, "version", &i);
-  hash_table_insert(ht, "apple", &a);
-  hash_table_insert(ht, "orange", str);
+  hash_table_insert(ht, "version", &i, sizeof(int));
+  hash_table_insert(ht, "apple", &a, sizeof(char));
+  hash_table_insert(ht, "orange", str, sizeof(str));
   hash_table_print(ht);
   printf("SIZE: %zu\n", ht->size);
   printf("SIZE: %zu\n", ht->capacity);
@@ -46,14 +47,18 @@ void hash_table_print(HashTable *ht) {
   }
 }
 
-void hash_table_insert(HashTable *ht, char *k, void *v) {
-  if (ht->size * sizeof(HashTable) >= ht->capacity) {
+void hash_table_insert(HashTable *ht, char *k, void *v, size_t valueSize) {
+  if (ht->size >= ht->capacity) {
     ht->capacity *= 2;
-    ht->values = realloc(ht->values, ht->capacity);
+    ht->values = realloc(ht->values, ht->capacity * sizeof(HashNode*));
+
+    for (size_t i = ht->capacity / 2; i < ht->capacity; i++) {
+      ht->values[i] = NULL;
+    }
   }
 
   int i = djb2(k, ht->capacity);
-  HashNode *hn = create_hash_node(k, v);
+  HashNode *hn = create_hash_node(k, v, valueSize);
 
   if (ht->values[i] == NULL) {
     ht->values[i] = hn;
@@ -77,16 +82,20 @@ HashTable* create_hash_table(size_t c) {
 
   ht->size = 0;
   ht->capacity = c;
-  ht->values = (void*)calloc(c, sizeof(HashNode*));
+  ht->values = (HashNode**)calloc(c, sizeof(HashNode*));
 
   return ht;
 }
 
-HashNode *create_hash_node(char *k, void *v) {
+HashNode *create_hash_node(char *k, void *v, size_t valueSize) {
   HashNode *hn = (HashNode*)malloc(sizeof(HashNode));
 
-  hn->key = k;
-  hn->value = v;
+  hn->key = malloc(strlen(k) + 1);
+  memcpy(hn->key, k, strlen(k) + 1);
+
+  hn->value = malloc(valueSize);
+  memcpy(hn->value, v, valueSize);
+
   hn->next = NULL;
 
   return hn;
@@ -99,7 +108,7 @@ int djb2(char *key, size_t size) {
 
   while(c) {
     index = ((index << 5) + index) + c;
-    c = *k++;
+    c = *++k;
   }
 
   return index % size;
