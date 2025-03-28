@@ -114,8 +114,8 @@ Buffer* read_input(int fd) {
 RPCJsonMetadata* mount_input(Buffer *buff) {
   RPCJsonMetadata *rpcJsonMetadata = (RPCJsonMetadata*)malloc(sizeof(RPCJsonMetadata));
 
-  char contentLengthKey[16] = "content-length: ";
-  char contentTypeKey[14] = "content-type: ";
+  char contentLengthKey[17] = "content-length: ";
+  char contentTypeKey[15] = "content-type: ";
   size_t bytes_moved = 0;
   int state = RPC_STATE_CONTENT_LENGTH;
 
@@ -131,11 +131,10 @@ RPCJsonMetadata* mount_input(Buffer *buff) {
     return NULL;
   }
 
-  buff->current_pos += sizeof(contentLengthKey) - 2;
+  buff->current_pos += strlen(contentLengthKey);
 
   while(bytes_moved < buff->size) {
     if (buff->current_pos[bytes_moved] == '\r' && buff->current_pos[bytes_moved + 1] == '\n') {
-      buff->current_pos += 2;
       switch (state) {
         case (RPC_STATE_CONTENT_LENGTH): {
           char tmpBuff[bytes_moved];
@@ -143,6 +142,7 @@ RPCJsonMetadata* mount_input(Buffer *buff) {
           tmpBuff[bytes_moved] = '\0';
           memcpy(tmpBuff, buff->current_pos, bytes_moved);
           rpcJsonMetadata->contentLength = atoi(tmpBuff);
+          bytes_moved += 2;
           buff->current_pos += bytes_moved;
           bytes_moved = 0;
 
@@ -152,16 +152,16 @@ RPCJsonMetadata* mount_input(Buffer *buff) {
             break;
           }
 
-          buff->current_pos += sizeof(contentTypeKey) - 2;
+          buff->current_pos += strlen(contentTypeKey);
           break;
         }
 
         case (RPC_STATE_CONTENT_TYPE):
           state = RPC_STATE_CONTENT;
           rpcJsonMetadata->contentType = malloc(bytes_moved);
-          memcpy(rpcJsonMetadata->contentType, buff->current_pos, bytes_moved - 1);
+          memcpy(rpcJsonMetadata->contentType, buff->current_pos, bytes_moved);
           rpcJsonMetadata->contentType[bytes_moved] = '\0';
-          buff->current_pos += bytes_moved + 2;
+          buff->current_pos += bytes_moved + 4;
           break;
       }
       continue;
@@ -171,10 +171,10 @@ RPCJsonMetadata* mount_input(Buffer *buff) {
 
     if (state == RPC_STATE_CONTENT) {
       rpcJsonMetadata->content->capacity = rpcJsonMetadata->contentLength + 1;
-      rpcJsonMetadata->content->size = rpcJsonMetadata->contentLength + 1;
+      rpcJsonMetadata->content->size = rpcJsonMetadata->content->capacity;
       rpcJsonMetadata->content->data = realloc(rpcJsonMetadata->content->data, rpcJsonMetadata->content->capacity);
-      memcpy(rpcJsonMetadata->content->data, buff->current_pos, rpcJsonMetadata->contentLength);
-      rpcJsonMetadata->content->data[rpcJsonMetadata->contentLength + 1] = '\0';
+      memcpy(rpcJsonMetadata->content->data, buff->current_pos, rpcJsonMetadata->content->capacity);
+      rpcJsonMetadata->content->data[rpcJsonMetadata->content->capacity] = '\0';
       return rpcJsonMetadata;
     }
   }
@@ -184,11 +184,11 @@ RPCJsonMetadata* mount_input(Buffer *buff) {
 }
 
 int compare_key(Buffer *buff, char *key) {
-  char *keyReaded = malloc(sizeof(key) + 1);
-  memcpy(keyReaded, buff->current_pos, sizeof(*key));
-  keyReaded[sizeof(key) + 1] = '\0';
+  char *keyReaded = malloc(strlen(key));
+  memcpy(keyReaded, buff->current_pos, strlen(key));
+  keyReaded[strlen(key) + 1] = '\0';
   toLowerCase(keyReaded);
-  int result = memcmp(keyReaded, key, sizeof(*key));
+  int result = memcmp(keyReaded, key, strlen(key) + 1);
   free(keyReaded);
   return result;
 }
