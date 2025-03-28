@@ -26,6 +26,7 @@ HashNode* create_hash_node(char *key, void *value, size_t valueSize, HashType va
 HashTable* create_hash_table(size_t capacity);
 void hash_table_insert(HashTable *ht, char *key, void *value, size_t valueSize, HashType valueType);
 void hash_table_print(HashTable *ht, int identation);
+void* hash_table_get(HashTable *ht, char *key);
 void hash_node_print(HashNode *hn, int identation);
 int djb2(char *key, size_t size);
 
@@ -53,7 +54,30 @@ int main() {
 
   printf("SIZE: %zu\n", ht->size);
   printf("SIZE: %zu\n", ht->capacity);
+
+  // TODO: Fix the nested get
+  HashNode *hn = hash_table_get(ht3, "orange");
+  HashNode *hn2 = hash_table_get((HashTable*)hn, "orange");
+  (void)hn2;
+  printf("NODE FOUND:\n");
+  //hash_node_print(hn2, 2);
+  printf("\n");
   return 0;
+}
+
+void* hash_table_get(HashTable *ht, char *key) {
+  int i = djb2(key, ht->capacity);
+
+  HashNode* hn = ht->values[i];
+
+  while(hn != NULL) {
+    if (memcmp(hn->key, key, strlen(key) + 1) == 0) {
+      return hn;
+    }
+    hn = hn->next;
+  }
+
+  return NULL;
 }
 
 void hash_table_print(HashTable *ht, int identation) {
